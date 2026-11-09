@@ -18,52 +18,18 @@ jobs:
           TG_API_ID: ${{ secrets.TG_API_ID }}
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
         run: |
-          if [ -f build-system/template_minimal_development_configuration.json ]; then
-            cp build-system/template_minimal_development_configuration.json "$RUNNER_TEMP/config.json"
-            jq --arg id "$TG_API_ID" --arg hash "$TG_API_HASH" \
-              '.api_id = $id | .api_hash = $hash' \
-              "$RUNNER_TEMP/config.json" > "$RUNNER_TEMP/config2.json"
-            mv "$RUNNER_TEMP/config2.json" "$RUNNER_TEMP/config.json"
-          else
-            echo "Template not found, using manual config"
-            cat > "$RUNNER_TEMP/config.json" <<EOF
-          {
-            "bundle_id": "com.example.telegramold",
-            "api_id": "$TG_API_ID",
-            "api_hash": "$TG_API_HASH",
-            "team_id": "0000000000",
-            "app_center_id": "0",
-            "is_internal_build": "true",
-            "is_appstore_build": "false",
-            "appstore_id": "0",
-            "app_specific_url_scheme": "tg",
-            "premium_iap_product_id": "",
-            "enable_siri": false,
-            "enable_icloud": false
-          }
-          EOF
-          fi
-
-      - name: Debug aps
-        run: |
-          ls build-system
-          grep -rn "aps" build-system/Make/*.py || true
-          ls -R build-system/fake-codesigning | head -50
-          grep -rn "aps-environment" Telegram/ --include=*.entitlements || true
-
-      - name: Remove push entitlement
-        run: |
-          for f in $(grep -rl "aps-environment" Telegram/ --include=*.entitlements); do
-            echo "Patching $f"
-            /usr/libexec/PlistBuddy -c "Delete :aps-environment" "$f" || true
-          done
-
-      - name: Find aps check
-        run: |
-          echo "=== где скрипт проверяет aps ==="
-          grep -rn "aps-environment" build-system/ --include=*.py -B6 -A6 || true
-          echo "=== есть ли aps в профиле Telegram ==="
-          security cms -D -i build-system/fake-codesigning/profiles/Telegram.mobileprovision | grep -i -A2 "aps" || echo "В ПРОФИЛЕ НЕТ aps"
+          PROFILE=build-system/fake-codesigning/profiles/Telegram.mobileprovision
+          security cms -D -i "$PROFILE" > "$RUNNER_TEMP/profile.plist"
+          APP_ID=$(/usr/libexec/PlistBuddy -c "Print :Entitlements:application-identifier" "$RUNNER_TEMP/profile.plist")
+          TEAM_ID="${APP_ID%%.*}"
+          BUNDLE_ID="${APP_ID#*.}"
+          echo "team_id=$TEAM_ID bundle_id=$BUNDLE_ID"
+          cp build-system/template_minimal_development_configuration.json "$RUNNER_TEMP/config.json"
+          jq --arg id "$TG_API_ID" --arg hash "$TG_API_HASH" \
+            --arg team "$TEAM_ID" --arg bundle "$BUNDLE_ID" \
+            '.api_id = $id | .api_hash = $hash | .team_id = $team | .bundle_id = $bundle' \
+            "$RUNNER_TEMP/config.json" > "$RUNNER_TEMP/config2.json"
+          mv "$RUNNER_TEMP/config2.json" "$RUNNER_TEMP/config.json"
 
       - name: Build
         run: |
