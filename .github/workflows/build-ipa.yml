@@ -13,6 +13,20 @@ jobs:
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_16.2.app
 
+      - name: Fill missing profiles
+        run: |
+          DIR=build-system/fake-codesigning/profiles
+          echo "Profiles before:"
+          ls -1 "$DIR"
+          for NAME in Telegram Share Widget NotificationContent NotificationService Intents BroadcastUpload WatchApp WatchExtension; do
+            if [ ! -f "$DIR/$NAME.mobileprovision" ]; then
+              echo "Missing $NAME, copying from Telegram"
+              cp "$DIR/Telegram.mobileprovision" "$DIR/$NAME.mobileprovision"
+            fi
+          done
+          echo "Profiles after:"
+          ls -1 "$DIR"
+
       - name: Create config
         env:
           TG_API_ID: ${{ secrets.TG_API_ID }}
