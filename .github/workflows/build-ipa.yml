@@ -24,7 +24,11 @@ jobs:
             "$RUNNER_TEMP/config.json" > "$RUNNER_TEMP/config2.json"
           mv "$RUNNER_TEMP/config2.json" "$RUNNER_TEMP/config.json"
           cat "$RUNNER_TEMP/config.json"
-
+      - name: Debug aps
+        run: |
+          grep -rn "aps" build-system/Make/*.py || true
+          ls -R build-system/fake-codesigning | head -50
+          grep -rn "aps-environment" Telegram/ --include=*.entitlements || true
       - name: Build
         run: |
           python3 build-system/Make/Make.py \
