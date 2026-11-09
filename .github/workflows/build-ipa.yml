@@ -51,6 +51,13 @@ jobs:
           ls -R build-system/fake-codesigning | head -50
           grep -rn "aps-environment" Telegram/ --include=*.entitlements || true
 
+      - name: Remove push entitlement
+        run: |
+          for f in $(grep -rl "aps-environment" Telegram/ --include=*.entitlements); do
+            echo "Patching $f"
+            /usr/libexec/PlistBuddy -c "Delete :aps-environment" "$f" || true
+          done
+
       - name: Build
         run: |
           python3 build-system/Make/Make.py \
