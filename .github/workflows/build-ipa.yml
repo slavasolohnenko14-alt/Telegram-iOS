@@ -58,6 +58,13 @@ jobs:
             /usr/libexec/PlistBuddy -c "Delete :aps-environment" "$f" || true
           done
 
+      - name: Find aps check
+        run: |
+          echo "=== где скрипт проверяет aps ==="
+          grep -rn "aps-environment" build-system/ --include=*.py -B6 -A6 || true
+          echo "=== есть ли aps в профиле Telegram ==="
+          security cms -D -i build-system/fake-codesigning/profiles/Telegram.mobileprovision | grep -i -A2 "aps" || echo "В ПРОФИЛЕ НЕТ aps"
+
       - name: Build
         run: |
           python3 build-system/Make/Make.py \
