@@ -18,7 +18,15 @@ jobs:
           TG_API_ID: ${{ secrets.TG_API_ID }}
           TG_API_HASH: ${{ secrets.TG_API_HASH }}
         run: |
-          cat > "$RUNNER_TEMP/config.json" <<EOF
+          if [ -f build-system/template_minimal_development_configuration.json ]; then
+            cp build-system/template_minimal_development_configuration.json "$RUNNER_TEMP/config.json"
+            jq --arg id "$TG_API_ID" --arg hash "$TG_API_HASH" \
+              '.api_id = $id | .api_hash = $hash' \
+              "$RUNNER_TEMP/config.json" > "$RUNNER_TEMP/config2.json"
+            mv "$RUNNER_TEMP/config2.json" "$RUNNER_TEMP/config.json"
+          else
+            echo "Template not found, using manual config"
+            cat > "$RUNNER_TEMP/config.json" <<EOF
           {
             "bundle_id": "com.example.telegramold",
             "api_id": "$TG_API_ID",
@@ -34,6 +42,14 @@ jobs:
             "enable_icloud": false
           }
           EOF
+          fi
+
+      - name: Debug aps
+        run: |
+          ls build-system
+          grep -rn "aps" build-system/Make/*.py || true
+          ls -R build-system/fake-codesigning | head -50
+          grep -rn "aps-environment" Telegram/ --include=*.entitlements || true
 
       - name: Build
         run: |
