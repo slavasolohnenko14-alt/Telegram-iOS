@@ -15,12 +15,6 @@ jobs:
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_16.2.app
 
-      - name: Download iOS platform
-        run: |
-          xcrun simctl list runtimes
-          xcodebuild -downloadPlatform iOS
-          xcrun simctl list runtimes
-
       - name: Create config
         env:
           TG_API_ID: ${{ secrets.TG_API_ID }}
@@ -30,8 +24,47 @@ jobs:
             '.api_id = $id | .api_hash = $hash' \
             build-system/appstore-configuration.json > "$RUNNER_TEMP/config.json"
 
-      - name: Import certificates
-        run: python3 build-system/Make/ImportCertificates.py --path build-system/fake-codesigning/certs || true
+      - name: Setup signing identity
+        run: |
+          set -e
+          cd "$RUNNER_TEMP"
+          cat > ossl.cnf <<'EOF'
+          [req]
+          distinguished_name = dn
+          x509_extensions = v3
+          prompt = no
+          [dn]
+          CN = Telegram Fake Signing
+          [v3]
+          basicConstraints = critical,CA:false
+          keyUsage = critical,digitalSignature
+          extendedKeyUsage = critical,codeSigning
+          EOF
+          /usr/bin/openssl req -x509 -newkey rsa:2048 -nodes -keyout k.pem -out c.pem -days 3650 -config ossl.cnf
+          /usr/bin/openssl x509 -in c.pem -outform der -out c.der
+          /usr/bin/openssl pkcs12 -export -inkey k.pem -in c.pem -out id.p12 -passout pass:fake
+          KC="$RUNNER_TEMP/fake.keychain-db"
+          security create-keychain -p fake "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p fake "$KC"
+          security import id.p12 -k "$KC" -P fake -A -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k fake "$KC"
+          EXISTING=$(security list-keychains -d user | tr -d '"')
+          security list-keychains -d user -s "$KC" $EXISTING
+          security default-keychain -d user -s "$KC"
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign -k /Library/Keychains/System.keychain c.pem || security add-trusted-cert -r trustRoot -p codeSign -k "$KC" c.pem || echo "trust step failed"
+          echo "--- all identities ---"
+          security find-identity -p codesigning
+          echo "--- valid identities ---"
+          security find-identity -v -p codesigning
+          SHA=$(/usr/bin/openssl x509 -in c.pem -noout -fingerprint -sha1 | sed 's/.*=//; s/://g')
+          echo "our sha1=$SHA"
+          if security find-identity -v -p codesigning | grep -q "$SHA"; then
+            echo "IDENTITY OK"
+          else
+            echo "IDENTITY NOT VALID"
+            exit 1
+          fi
 
       - name: Prepare profiles
         run: |
@@ -39,11 +72,11 @@ jobs:
           TEAM=$(jq -r .team_id "$RUNNER_TEMP/config.json")
           BUNDLE=$(jq -r .bundle_id "$RUNNER_TEMP/config.json")
           echo "team=$TEAM bundle=$BUNDLE"
-          openssl req -x509 -newkey rsa:2048 -nodes -keyout "$RUNNER_TEMP/k.pem" -out "$RUNNER_TEMP/c.pem" -subj "/CN=fake" -days 3650
           TEAM="$TEAM" BUNDLE="$BUNDLE" python3 - <<'PY'
           import os, plistlib, uuid, subprocess, datetime, copy, glob
           tmp = os.environ["RUNNER_TEMP"]
           d = "build-system/fake-codesigning/profiles"
+          cert = open(tmp + "/c.der", "rb").read()
           def decode(path):
               out = subprocess.check_output(["openssl", "smime", "-inform", "der", "-verify", "-noverify", "-in", path], stderr=subprocess.DEVNULL)
               return plistlib.loads(out)
@@ -65,10 +98,24 @@ jobs:
           for path in sorted(glob.glob(d + "/*.mobileprovision")):
               p = decode(path)
               p["ExpirationDate"] = future
+              p["DeveloperCertificates"] = [cert]
               sign(p, path)
               q = decode(path)
-              print(os.path.basename(path), q["Entitlements"]["application-identifier"], q["ExpirationDate"])
+              print(os.path.basename(path), q["Entitlements"]["application-identifier"], q["ExpirationDate"], len(q["DeveloperCertificates"]))
           PY
+
+      - name: Download iOS platform
+        run: |
+          xcodebuild -downloadPlatform iOS
+          xcrun simctl list runtimes
+
+      - name: Restore Bazel cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/bazel-cache
+          key: bazel-${{ github.run_id }}
+          restore-keys: |
+            bazel-
 
       - name: Build
         run: |
@@ -80,6 +127,13 @@ jobs:
             --codesigningInformationPath=build-system/fake-codesigning \
             --buildNumber=100001 \
             --configuration=release_arm64
+
+      - name: Save Bazel cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/bazel-cache
+          key: bazel-${{ github.run_id }}
 
       - name: Collect IPA
         run: |
