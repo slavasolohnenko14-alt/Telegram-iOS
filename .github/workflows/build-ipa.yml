@@ -33,31 +33,42 @@ jobs:
       - name: Import certificates
         run: python3 build-system/Make/ImportCertificates.py --path build-system/fake-codesigning/certs || true
 
-      - name: Create BroadcastUpload profile
+      - name: Prepare profiles
         run: |
           set -e
-          DIR=build-system/fake-codesigning/profiles
           TEAM=$(jq -r .team_id "$RUNNER_TEMP/config.json")
           BUNDLE=$(jq -r .bundle_id "$RUNNER_TEMP/config.json")
           echo "team=$TEAM bundle=$BUNDLE"
-          openssl smime -inform der -verify -noverify -in "$DIR/Share.mobileprovision" -out "$RUNNER_TEMP/share.plist"
-          TEAM="$TEAM" BUNDLE="$BUNDLE" python3 - <<'PY'
-          import os, plistlib, uuid
-          tmp = os.environ["RUNNER_TEMP"]
-          with open(tmp + "/share.plist", "rb") as f:
-              p = plistlib.load(f)
-          p["Entitlements"]["application-identifier"] = os.environ["TEAM"] + "." + os.environ["BUNDLE"] + ".BroadcastUpload"
-          p["Name"] = "BroadcastUpload"
-          p["AppIDName"] = "BroadcastUpload"
-          p["UUID"] = str(uuid.uuid4()).upper()
-          with open(tmp + "/bu.plist", "wb") as f:
-              plistlib.dump(p, f, fmt=plistlib.FMT_XML)
-          PY
           openssl req -x509 -newkey rsa:2048 -nodes -keyout "$RUNNER_TEMP/k.pem" -out "$RUNNER_TEMP/c.pem" -subj "/CN=fake" -days 3650
-          openssl smime -sign -binary -nodetach -signer "$RUNNER_TEMP/c.pem" -inkey "$RUNNER_TEMP/k.pem" -in "$RUNNER_TEMP/bu.plist" -outform der -out "$DIR/BroadcastUpload.mobileprovision"
-          echo "--- check ---"
-          openssl smime -inform der -verify -noverify -in "$DIR/BroadcastUpload.mobileprovision" | grep -A1 application-identifier
-          ls -1 "$DIR"
+          TEAM="$TEAM" BUNDLE="$BUNDLE" python3 - <<'PY'
+          import os, plistlib, uuid, subprocess, datetime, copy, glob
+          tmp = os.environ["RUNNER_TEMP"]
+          d = "build-system/fake-codesigning/profiles"
+          def decode(path):
+              out = subprocess.check_output(["openssl", "smime", "-inform", "der", "-verify", "-noverify", "-in", path], stderr=subprocess.DEVNULL)
+              return plistlib.loads(out)
+          def sign(p, path):
+              with open(tmp + "/x.plist", "wb") as f:
+                  plistlib.dump(p, f, fmt=plistlib.FMT_XML)
+              subprocess.check_call(["openssl", "smime", "-sign", "-binary", "-nodetach",
+                                     "-signer", tmp + "/c.pem", "-inkey", tmp + "/k.pem",
+                                     "-in", tmp + "/x.plist", "-outform", "der", "-out", path],
+                                    stderr=subprocess.DEVNULL)
+          share = decode(d + "/Share.mobileprovision")
+          bu = copy.deepcopy(share)
+          bu["Entitlements"]["application-identifier"] = os.environ["TEAM"] + "." + os.environ["BUNDLE"] + ".BroadcastUpload"
+          bu["Name"] = "BroadcastUpload"
+          bu["AppIDName"] = "BroadcastUpload"
+          bu["UUID"] = str(uuid.uuid4()).upper()
+          sign(bu, d + "/BroadcastUpload.mobileprovision")
+          future = datetime.datetime(2030, 10, 29, 10, 40, 0)
+          for path in sorted(glob.glob(d + "/*.mobileprovision")):
+              p = decode(path)
+              p["ExpirationDate"] = future
+              sign(p, path)
+              q = decode(path)
+              print(os.path.basename(path), q["Entitlements"]["application-identifier"], q["ExpirationDate"])
+          PY
 
       - name: Build
         run: |
