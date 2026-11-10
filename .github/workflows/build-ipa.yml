@@ -15,6 +15,12 @@ jobs:
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_16.2.app
 
+      - name: Download iOS platform
+        run: |
+          xcrun simctl list runtimes
+          xcodebuild -downloadPlatform iOS
+          xcrun simctl list runtimes
+
       - name: Create config
         env:
           TG_API_ID: ${{ secrets.TG_API_ID }}
