@@ -9,7 +9,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: TelegramMessenger/Telegram-iOS
-          ref: release-11.15
+          ref: e5762bd9c88eadb22442d90057ff4b6cf3c844cb
           submodules: recursive
 
       - name: Select Xcode
@@ -25,11 +25,12 @@ jobs:
             build-system/appstore-configuration.json > "$RUNNER_TEMP/config.json"
 
       - name: Import certificates
-        run: python3 build-system/Make/ImportCertificates.py --path build-system/fake-codesigning/certs
+        run: python3 build-system/Make/ImportCertificates.py --path build-system/fake-codesigning/certs || true
 
       - name: Build
         run: |
           python3 -u build-system/Make/Make.py \
+            --overrideXcodeVersion \
             --cacheDir="$HOME/bazel-cache" \
             build \
             --configurationPath="$RUNNER_TEMP/config.json" \
@@ -40,9 +41,9 @@ jobs:
       - name: Collect IPA
         run: |
           mkdir -p build/artifacts
-          for f in bazel-out/applebin_ios-ios_arm*-opt-ST-*/bin/Telegram/Telegram.ipa; do
-            cp "$f" build/artifacts/
-          done
+          IPA=$(find -L bazel-out -name Telegram.ipa 2>/dev/null | head -n1)
+          echo "found: $IPA"
+          cp "$IPA" build/artifacts/Telegram.ipa
           ls -la build/artifacts
 
       - uses: actions/upload-artifact@v4
