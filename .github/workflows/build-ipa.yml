@@ -106,7 +106,8 @@ jobs:
 
       - name: Download iOS platform
         run: |
-          xcodebuild -downloadPlatform iOS
+          xcrun simctl list runtimes
+          xcodebuild -downloadPlatform iOS || { sleep 15; xcrun simctl list runtimes; xcodebuild -downloadPlatform iOS; }
           xcrun simctl list runtimes
 
       - name: Restore Bazel cache
